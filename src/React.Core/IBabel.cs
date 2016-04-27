@@ -7,6 +7,8 @@
  *  of patent rights can be found in the PATENTS file in the same directory.
  */
 
+using System.IO;
+
 namespace React
 {
 	/// <summary>
@@ -20,6 +22,15 @@ namespace React
 		/// <param name="filename">Name of the file to load</param>
 		/// <returns>JavaScript</returns>
 		string TransformFile(string filename);
+
+	    /// <summary>
+	    /// Transforms a JavaScript file. Results of the transformation are cached.
+	    /// </summary>
+	    /// <param name="stream">Stream of the file to load</param>
+	    /// <param name="fileName">Name of the file</param>
+	    /// <param name="physicalPath">Physical path of the file, if any</param>
+	    /// <returns>JavaScript</returns>
+	    string TransformStream(Stream stream, string fileName, string physicalPath);
 
 		/// <summary>
 		/// Transforms a JavaScript file via Babel and also returns a source map to map the

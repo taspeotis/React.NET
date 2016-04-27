@@ -156,9 +156,17 @@ namespace React.AspNet
 				_babel = babel;
 				_fileInfo = fileInfo;
 
-				_content = new Lazy<byte[]>(
-					() => Encoding.UTF8.GetBytes(_babel.TransformFile(fileInfo.PhysicalPath))
-				);
+				_content = new Lazy<byte[]>(() =>
+				{
+				    using (var readStream = fileInfo.CreateReadStream())
+				    {
+				        var fileName = fileInfo.Name;
+                        var physicalPath = fileInfo.PhysicalPath;
+                        var content = _babel.TransformStream(readStream, fileName, physicalPath);
+
+				        return Encoding.UTF8.GetBytes(content);
+				    }
+				});
 			}
 
 			public Stream CreateReadStream()

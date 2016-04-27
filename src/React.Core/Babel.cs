@@ -19,10 +19,12 @@ namespace React
 	/// </summary>
 	public class Babel : IBabel
 	{
-		/// <summary>
-		/// Cache key for JavaScript compilation
-		/// </summary>
-		protected const string JSX_CACHE_KEY = "JSX_v3_{0}";
+        private static readonly TimeSpan ThirtyMinutes = TimeSpan.FromMinutes(30);
+
+        /// <summary>
+        /// Cache key for JavaScript compilation
+        /// </summary>
+        protected const string JSX_CACHE_KEY = "JSX_v3_{0}";
 		/// <summary>
 		/// Suffix to append to compiled files
 		/// </summary>
@@ -59,9 +61,9 @@ namespace React
 		/// <summary>
 		/// The serialized Babel configuration
 		/// </summary>
-		protected readonly string _babelConfig; 
+		protected readonly string _babelConfig;
 
-		/// <summary>
+	    /// <summary>
 		/// Initializes a new instance of the <see cref="Babel"/> class.
 		/// </summary>
 		/// <param name="environment">The ReactJS.NET environment</param>
@@ -88,6 +90,65 @@ namespace React
 		{
 			return TransformFileWithSourceMap(filename, false).Code;
 		}
+
+	    /// <summary>
+	    /// Transforms a JavaScript file. Results of the transformation are cached.
+	    /// </summary>
+	    /// <param name="stream">Stream of the file to load</param>
+	    /// <param name="fileName"></param>
+	    /// <param name="physicalPath">Physical path of the file, if any</param>
+	    /// <returns>JavaScript</returns>
+	    public virtual string TransformStream(Stream stream, string fileName, string physicalPath)
+        {
+            // If we get a cache hit then we don't need to read the stream's contents.
+            var lazyStreamContent = new Lazy<string>(isThreadSafe: false, valueFactory: () =>
+            {
+                using (var streamReader = new StreamReader(stream))
+                    return streamReader.ReadToEnd();
+            });
+
+            // If we have a physical path we don't need to calculate the hash.
+            var lazyHash = new Lazy<string>(isThreadSafe: false,
+                valueFactory: () => _fileCacheHash.CalculateHash(lazyStreamContent.Value));
+
+            var cacheKey = string.Format(JSX_CACHE_KEY, physicalPath ?? lazyHash.Value);
+
+            // 1. Check in-memory cache.
+            var cached = _cache.Get<JavaScriptWithSourceMap>(cacheKey);
+
+            if (cached != null)
+                return cached.Code;
+
+            // 2. Check on-disk cache
+            var pseudoPath = physicalPath ?? lazyHash.Value + ".jsx";
+            var output = LoadFromFileCache(pseudoPath, lazyHash.Value, forceGenerateSourceMap: false);
+
+            if (output == null)
+            {
+                // 3. Not cached, perform the transformation
+                try
+                {
+                    output = TransformWithHeader(pseudoPath, lazyStreamContent.Value, lazyHash.Value);
+                }
+                catch (BabelException ex)
+                {
+                    // Add the filename to the error message
+                    throw new BabelException(string.Format(
+                        "In file \"{0}\": {1}",
+                        fileName,
+                        ex.Message
+                    ), ex);
+                }
+            }
+
+            // Arguably we could use pseudoPath instead of "null" but if a stream isn't
+            // backed by a physical path then there's a good chance that it's immutable.
+            var cacheDependencyFiles = physicalPath != null ? new[] {_fileSystem.MapPath(physicalPath)} : null;
+
+            _cache.Set(cacheKey, output, slidingExpiration: ThirtyMinutes, cacheDependencyFiles: cacheDependencyFiles);
+
+            return output.Code;
+        }
 
 		/// <summary>
 		/// Transforms a JavaScript file via Babel and also returns a source map to map the
@@ -141,7 +202,7 @@ namespace React
 			_cache.Set(
 				cacheKey,
 				output,
-				slidingExpiration: TimeSpan.FromMinutes(30),
+				slidingExpiration: ThirtyMinutes,
 				cacheDependencyFiles: new[] { fullPath }
 			);
 			return output;
